@@ -1,62 +1,137 @@
 package com.shepherdmoney.interviewproject.controller;
 
+import com.shepherdmoney.interviewproject.model.BalanceHistory;
+import com.shepherdmoney.interviewproject.model.CreditCard;
+import com.shepherdmoney.interviewproject.model.User;
+import com.shepherdmoney.interviewproject.repository.BalanceHistoryRepository;
+import com.shepherdmoney.interviewproject.repository.CreditCardRepository;
+import com.shepherdmoney.interviewproject.repository.UserRepository;
 import com.shepherdmoney.interviewproject.vo.request.AddCreditCardToUserPayload;
 import com.shepherdmoney.interviewproject.vo.request.UpdateBalancePayload;
 import com.shepherdmoney.interviewproject.vo.response.CreditCardView;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-
+import java.time.LocalDate;
+import java.util.*;
 
 @RestController
 public class CreditCardController {
 
-    // TODO: wire in CreditCard repository here (~1 line)
+    @Autowired
+    private CreditCardRepository creditCardRepository;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private BalanceHistoryRepository balanceHistoryRepository;
 
     @PostMapping("/credit-card")
     public ResponseEntity<Integer> addCreditCardToUser(@RequestBody AddCreditCardToUserPayload payload) {
-        // TODO: Create a credit card entity, and then associate that credit card with user with given userId
-        //       Return 200 OK with the credit card id if the user exists and credit card is successfully associated with the user
-        //       Return other appropriate response code for other exception cases
-        //       Do not worry about validating the card number, assume card number could be any arbitrary format and length
-        return null;
+        Optional<User> user = userRepository.findById(payload.getUserId());
+        if (user.isEmpty()) {
+            return ResponseEntity.badRequest().body(null);
+        }
+        if (creditCardRepository.findByNumber(payload.getCardNumber()).isPresent()) {
+            return ResponseEntity.badRequest().body(null);
+        }
+
+        CreditCard creditCard = new CreditCard();
+        creditCard.setNumber(payload.getCardNumber());
+        creditCard.setIssuanceBank(payload.getCardIssuanceBank());
+        creditCard.setUser(user.get());
+        creditCard.setBalanceHistory(new TreeMap<>());
+        CreditCard savedCard = creditCardRepository.save(creditCard);
+        return ResponseEntity.ok(savedCard.getId());
     }
 
     @GetMapping("/credit-card:all")
     public ResponseEntity<List<CreditCardView>> getAllCardOfUser(@RequestParam int userId) {
-        // TODO: return a list of all credit card associated with the given userId, using CreditCardView class
-        //       if the user has no credit card, return empty list, never return null
-        return null;
+        if (!userRepository.existsById(userId)) {
+            return ResponseEntity.badRequest().body(null);
+        }
+
+        List<CreditCard> creditCards = creditCardRepository.findByUserId(userId);
+        // Convert List of CreditCard to List of CreditCardView
+        List<CreditCardView> creditCardViews = creditCards.stream()
+                .map(card -> new CreditCardView(card.getNumber(), card.getIssuanceBank()))
+                .toList();
+        return ResponseEntity.ok(creditCardViews);
     }
 
     @GetMapping("/credit-card:user-id")
     public ResponseEntity<Integer> getUserIdForCreditCard(@RequestParam String creditCardNumber) {
-        // TODO: Given a credit card number, efficiently find whether there is a user associated with the credit card
-        //       If so, return the user id in a 200 OK response. If no such user exists, return 400 Bad Request
-        return null;
+        Optional<CreditCard> creditCard = creditCardRepository.findByNumber(creditCardNumber);
+        if (creditCard.isEmpty()) {
+            return ResponseEntity.badRequest().body(null);
+        } else {
+            return ResponseEntity.ok(creditCard.get().getUser().getId());
+        }
+    }
+
+    @GetMapping("/credit-card:balance")
+    public ResponseEntity<Map<LocalDate, BalanceHistory>> getBalanceForCreditCard(@RequestParam String creditCardNumber) {
+        Optional<CreditCard> creditCard = creditCardRepository.findByNumber(creditCardNumber);
+        if (creditCard.isEmpty()) {
+            return ResponseEntity.badRequest().body(null);
+        } else {
+            SortedMap<LocalDate, BalanceHistory> balanceHistory = creditCard.get().getBalanceHistory();
+            return ResponseEntity.ok(balanceHistory);
+        }
     }
 
     @PostMapping("/credit-card:update-balance")
-    public SomeEnityData postMethodName(@RequestBody UpdateBalancePayload[] payload) {
-        //TODO: Given a list of transactions, update credit cards' balance history.
-        //      1. For the balance history in the credit card
-        //      2. If there are gaps between two balance dates, fill the empty date with the balance of the previous date
-        //      3. Given the payload `payload`, calculate the balance different between the payload and the actual balance stored in the database
-        //      4. If the different is not 0, update all the following budget with the difference
-        //      For example: if today is 4/12, a credit card's balanceHistory is [{date: 4/12, balance: 110}, {date: 4/10, balance: 100}],
-        //      Given a balance amount of {date: 4/11, amount: 110}, the new balanceHistory is
-        //      [{date: 4/12, balance: 120}, {date: 4/11, balance: 110}, {date: 4/10, balance: 100}]
-        //      This is because
-        //      1. You would first populate 4/11 with previous day's balance (4/10), so {date: 4/11, amount: 100}
-        //      2. And then you observe there is a +10 difference
-        //      3. You propagate that +10 difference until today
-        //      Return 200 OK if update is done and successful, 400 Bad Request if the given card number
-        //        is not associated with a card.
-        
-        return null;
+    public ResponseEntity<String> postMethodName(@RequestBody UpdateBalancePayload[] payload) {
+        for (UpdateBalancePayload update : payload) {
+            Optional<CreditCard> creditCard = creditCardRepository.findByNumber(update.getCreditCardNumber());
+            if (creditCard.isEmpty()) {
+                return ResponseEntity.badRequest().body("Credit card not found");
+            }
+            CreditCard card = creditCard.get();
+            SortedMap<LocalDate, BalanceHistory> cardBalanceHistory = card.getBalanceHistory();
+
+            // Processing dates before the requested update date
+            if (!cardBalanceHistory.containsKey(update.getBalanceDate())) {
+                // If the requested update is the first balance history or
+                // before the first date in the balance history, fill the gap with the balance of the updated date
+                if (cardBalanceHistory.isEmpty() || cardBalanceHistory.firstKey().isAfter(update.getBalanceDate())) {
+                    cardBalanceHistory.put(update.getBalanceDate(), new BalanceHistory(update.getBalanceDate(), update.getBalanceAmount()));
+                    balanceHistoryRepository.save(cardBalanceHistory.get(update.getBalanceDate()));
+                }
+                LocalDate lastDate = cardBalanceHistory.firstKey();
+                this.propagateBalanceDifference(cardBalanceHistory, lastDate, update.getBalanceDate().minusDays(1), 0);
+            }
+
+            // Processing dates after the requested update date with calculated difference
+            double existingBalance = cardBalanceHistory.getOrDefault(update.getBalanceDate(), new BalanceHistory(update.getBalanceDate(), 0)).getBalance();
+            double difference = update.getBalanceAmount() - existingBalance;
+            this.propagateBalanceDifference(cardBalanceHistory, update.getBalanceDate(), LocalDate.now(), difference);
+
+            creditCardRepository.save(card);
+            for (BalanceHistory balance : cardBalanceHistory.values()) {
+                System.out.println(balance.getDate() + " " + balance.getBalance());
+            }
+        }
+        return ResponseEntity.ok().body("Balance updated successfully");
     }
-    
+
+    private void propagateBalanceDifference(SortedMap<LocalDate, BalanceHistory> balanceHistory, LocalDate startDate, LocalDate endDate, double amount) {
+        assert !startDate.isAfter(endDate);
+        assert balanceHistory.containsKey(startDate);
+        for (LocalDate date = startDate; !date.isAfter(endDate); date = date.plusDays(1)) {
+            if (!balanceHistory.containsKey(date)) {
+                balanceHistory.put(date, new BalanceHistory(date, balanceHistory.get(date.minusDays(1)).getBalance()));
+                balanceHistoryRepository.save(balanceHistory.get(date));
+            }
+            if (amount != 0) {
+                BalanceHistory currentBalance = balanceHistory.get(date);
+                double newBalance = currentBalance.getBalance() + amount;
+                balanceHistory.put(date, new BalanceHistory(date, newBalance));
+                balanceHistoryRepository.save(balanceHistory.get(date));
+            }
+        }
+    }
+
 }

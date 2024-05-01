@@ -2,10 +2,7 @@ package com.shepherdmoney.interviewproject.model;
 
 import java.time.LocalDate;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
+import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.Setter;
@@ -16,6 +13,7 @@ import lombok.ToString;
 @Setter
 @ToString
 @RequiredArgsConstructor
+@Embeddable
 public class BalanceHistory {
 
     @Id
@@ -25,5 +23,9 @@ public class BalanceHistory {
     private LocalDate date;
 
     private double balance;
-    
+
+    public BalanceHistory(LocalDate balanceDate, double balance) {
+        this.date = balanceDate;
+        this.balance = balance;
+    }
 }
