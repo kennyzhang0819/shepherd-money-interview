@@ -34,6 +34,7 @@ public class CreditCardController {
         if (user.isEmpty()) {
             return ResponseEntity.badRequest().body(null);
         }
+        //Duplicate credit card number not allowed
         if (creditCardRepository.findByNumber(payload.getCardNumber()).isPresent()) {
             return ResponseEntity.badRequest().body(null);
         }
@@ -94,8 +95,8 @@ public class CreditCardController {
 
             // Processing dates before the requested update date
             if (!cardBalanceHistory.containsKey(update.getBalanceDate())) {
-                // If the requested update is the first balance history or
-                // before the first date in the balance history, fill the gap with the balance of the updated date
+                // If the requested update is the first balance history or before the first date in the balance history,
+                // fill the gap with the balance of the updated date (doesn't update future balance histories)
                 if (cardBalanceHistory.isEmpty() || cardBalanceHistory.firstKey().isAfter(update.getBalanceDate())) {
                     cardBalanceHistory.put(update.getBalanceDate(), new BalanceHistory(update.getBalanceDate(), update.getBalanceAmount()));
                     balanceHistoryRepository.save(cardBalanceHistory.get(update.getBalanceDate()));
